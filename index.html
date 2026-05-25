@@ -55,6 +55,7 @@
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
     .lbl { font-size: 12px; color: var(--color-text-secondary); display: block; margin-bottom: 5px; }
     select, input { width: 100%; padding: 8px 10px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-primary); color: var(--color-text-primary); font-size: 14px; outline: none; }
+    input[type="file"] { padding: 6px 10px; font-size: 13px; cursor: pointer; }
     .side-row { display: flex; gap: 8px; }
     .side-btn { flex: 1; padding: 9px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--color-text-secondary); }
     .side-btn.atk-on { background: #faeeda; border-color: #ba7517; color: #633806; }
@@ -166,8 +167,9 @@
         <input type="text" id="add-url" placeholder="YouTube, Instagram, Reddit, TikTok — any URL" />
       </div>
       <div class="add-section">
-        <div class="step"><div class="step-num">2</div><span class="step-label">Give it a title (optional)</span></div>
-        <input type="text" id="add-title" placeholder="e.g. 2F Armory plant strat with Thermite" />
+        <div class="step"><div class="step-num">2</div><span class="step-label">Give it a title & upload an image (optional)</span></div>
+        <input type="text" id="add-title" placeholder="e.g. 2F Armory plant strat with Thermite" style="margin-bottom: 8px;" />
+        <input type="file" id="add-image-file" accept="image/*" />
       </div>
       <hr class="divider"/>
       <div class="add-section">
@@ -458,7 +460,14 @@ function linkIcon(url){
 
 function stratCard(s,showDelete){
   const ytId=getYTId(s.url);
-  const thumb=ytId?`<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:var(--border-radius-md);margin-bottom:8px;display:block;" />`:'';
+  
+  // Prioritize the uploaded custom image link, fall back to YouTube thumbnail if none uploaded
+  let thumb = '';
+  if (s.imageUrl) {
+    thumb = `<img src="${s.imageUrl}" style="width:100%; max-height:240px; object-fit:cover; border-radius:var(--border-radius-md); margin-bottom:8px; display:block;" />`;
+  } else if (ytId) {
+    thumb = `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%; border-radius:var(--border-radius-md); margin-bottom:8px; display:block;" />`;
+  }
   
   const delBtn=showDelete?`<button class="btn btn-danger" style="padding:4px 10px;font-size:12px" data-delete-id="${s.id}"><i class="ti ti-trash" aria-hidden="true"></i></button>`:'';
   const opBadges=s.operators.map(op=>`<span class="badge b-op"><img src="${iconUrl(op)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline'" /><span style="display:none; font-size:9px; font-weight:bold; margin-right:2px">${op.substring(0,2).toUpperCase()}</span>${op}</span>`).join('');
@@ -487,12 +496,14 @@ function renderAllList(){
     :strats.map(s=>stratCard(s,true)).join('');
 }
 
-// SAVE DIRECTLY TO CLOUD DATABASE
+// SAVE DIRECTLY TO CLOUD DATABASE (WITH STORAGE UPLOAD HANDLING)
 async function saveStrat(){
   const url=document.getElementById('add-url').value.trim();
   const map=document.getElementById('add-map').value;
   const objective=document.getElementById('add-obj').value;
   const msg=document.getElementById('add-msg');
+  const imageFileInput = document.getElementById('add-image-file');
+  
   const setMsg=(t,ok)=>{msg.style.color=ok?'var(--color-text-success)':'var(--color-text-danger)';msg.textContent=t;};
   
   if(!url){setMsg('Please paste a video URL.',false);return;}
@@ -500,26 +511,54 @@ async function saveStrat(){
   if(!objective){setMsg('Please select a target objective site.',false);return;}
   if(!addSide){setMsg('Please select attack or defense.',false);return;}
   
-  const newStrat = {
-    id:Date.now().toString(),
-    url,
-    title:document.getElementById('add-title').value.trim(),
-    map,
-    objective,
-    side:addSide,
-    operators:[...addSelOps],
-    added:Date.now()
-  };
-
-  setMsg('Saving to cloud database...', true);
+  setMsg('Uploading image and saving strat...', true);
+  
+  let finalImageUrl = '';
 
   try {
-    const { error } = await supabaseClient.from('strats').insert({
+    // 1. Process local image file upload into Supabase Storage Bucket if selected
+    if (imageFileInput.files && imageFileInput.files.length > 0) {
+      const file = imageFileInput.files[0];
+      
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+      const filePath = `uploads/${fileName}`;
+      
+      const { data: uploadData, error: uploadError } = await supabaseClient
+        .storage
+        .from('strat-images')
+        .upload(filePath, file);
+        
+      if (uploadError) throw uploadError;
+      
+      const { data: publicUrlData } = supabaseClient
+        .storage
+        .from('strat-images')
+        .getPublicUrl(filePath);
+        
+      finalImageUrl = publicUrlData.publicUrl;
+    }
+
+    // 2. Structure full payload data
+    const newStrat = {
+      id: Date.now().toString(),
+      url,
+      title: document.getElementById('add-title').value.trim(),
+      imageUrl: finalImageUrl,
+      map,
+      objective,
+      side: addSide,
+      operators: [...addSelOps],
+      added: Date.now()
+    };
+
+    // 3. Write data row to Supabase Database table
+    const { error: dbError } = await supabaseClient.from('strats').insert({
       id: newStrat.id,
       payload: JSON.stringify(newStrat)
     });
 
-    if (error) throw error;
+    if (dbError) throw dbError;
 
     strats.push(newStrat);
     setMsg('Strat saved safely to cloud!',true);
@@ -528,13 +567,15 @@ async function saveStrat(){
     updateCount();
     setTimeout(()=>switchTab('all'),600);
   } catch(e) {
-    setMsg('Error saving: ' + e.message, false);
+    console.error("Complete save operation failed:", e);
+    setMsg('Error saving: ' + (e.message || e), false);
   }
 }
 
 function clearAddForm(keepMsg){
   document.getElementById('add-url').value='';
   document.getElementById('add-title').value='';
+  document.getElementById('add-image-file').value=''; // Resets file selection picker cleanly
   document.getElementById('add-map').value='';
   updateObjectiveOptions('add-map', 'add-obj', false);
   addSide=''; addSelOps.clear(); addActiveCat='All';
