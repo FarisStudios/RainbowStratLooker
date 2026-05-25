@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>R6S Strat Library</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
     /* Declared all missing layout variables and color systems */
     :root {
@@ -67,7 +70,6 @@
     .chip { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); font-size: 12px; cursor: pointer; color: var(--color-text-secondary); background: transparent; user-select: none; }
     .chip img { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; }
     
-    /* Styled custom text placeholder fallback avatars for when operators image hosts break */
     .op-avatar-placeholder { width: 16px; height: 16px; border-radius: 3px; background: #e2e5e8; font-size: 9px; font-weight: bold; display: flex; align-items: center; justify-content: center; text-transform: uppercase; color: #1c1e21; flex-shrink: 0; }
     @media(prefers-color-scheme:dark){ .op-avatar-placeholder { background: #3e4042; color: #e4e6eb; } }
 
@@ -206,9 +208,16 @@
 </div>
 
 <script>
+// ==========================================
+// SUPABASE CREDENTIAL CONFIGURATION
+// Paste your unique API dashboard keys here!
+// ==========================================
+const SUPABASE_URL = 'https://nydxccftkqkztybrfodl.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_cQOaV1XAJAT8ddd9Vu7P0w_Cd5qdHV9';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
 const MAPS = ["Bank","Border","Chalet","Clubhouse","Coastline","Consulate","Emerald Plains","Favela","Fortress","Hereford Base","House","Kanal","Kafe Dostoyevsky","Lair","Nighthaven Labs","Oregon","Outback","Skyscraper","Stadium Bravo","Theme Park","Tower","Villa","Yacht"].sort();
 
-// Complete map objective pairings dictionary
 const MAP_OBJECTIVES = {
   "Bank": ["2F Executive Lounge/CEO Office", "1F Staff Room/Open Office", "1F Tellers' Office/Archives", "B Lockers/CCTV Room"],
   "Border": ["2F Armory Lockers/Archives", "1F Ventilation Room/Workshop", "1F Customs Inspection", "1F Tellers/Bathroom"],
@@ -257,12 +266,10 @@ function opKey(name) {
   return name.toLowerCase().replace(/ø/g,'o').replace(/ã/g,'a').replace(/ä/g,'a').replace(/é/g,'e').replace(/\s+/g,'').replace(/[^a-z0-9]/g,'');
 }
 
-// Fixed operator icon routing targets to use the local folder cleanly
 function iconUrl(name) {
   return `OperatorIcons/Scalable vector graphic (SVG)/${opKey(name)}.svg`;
 }
 
-// Injects custom styled two-letter code placeholders if image resources fail to load
 function handleMissingIcon(imgElement, name) {
   imgElement.style.display = 'none';
   const placeholder = document.createElement('div');
@@ -275,22 +282,22 @@ let strats=[], findSide='', addSide='';
 let findSelOps=new Set(), addSelOps=new Set();
 let findActiveCat='All', addActiveCat='All';
 
-function load(){
+// LOAD DATA DIRECTLY FROM SUPABASE CLOUD
+async function load(){
   try {
-    const r = localStorage.getItem('r6-strats');
-    if(r) strats = JSON.parse(r);
+    const { data, error } = await supabase.from('strats').select('*');
+    if (error) throw error;
+    
+    if (data) {
+      strats = data.map(row => JSON.parse(row.payload));
+    }
   } catch(e) {
+    console.error("Cloud database fetch failed. Using empty list.", e);
     strats = [];
   }
-  populateMaps(); renderAllList(); updateCount();
-}
-
-function persist(){
-  try {
-    localStorage.setItem('r6-strats', JSON.stringify(strats));
-  } catch(e) {
-    console.error("Storage save failed", e);
-  }
+  populateMaps(); 
+  renderAllList(); 
+  updateCount();
 }
 
 function updateCount(){document.getElementById('total-count').textContent=strats.length;}
@@ -304,7 +311,6 @@ function populateMaps(){
   });
 }
 
-// Dynamically handles objective select values based on map selections
 function updateObjectiveOptions(mapId, objId, isFilter) {
   const mapVal = document.getElementById(mapId).value;
   const objSelect = document.getElementById(objId);
@@ -481,7 +487,8 @@ function renderAllList(){
     :strats.map(s=>stratCard(s,true)).join('');
 }
 
-function saveStrat(){
+// SAVE DIRECTLY TO CLOUD DATABASE
+async function saveStrat(){
   const url=document.getElementById('add-url').value.trim();
   const map=document.getElementById('add-map').value;
   const objective=document.getElementById('add-obj').value;
@@ -493,7 +500,7 @@ function saveStrat(){
   if(!objective){setMsg('Please select a target objective site.',false);return;}
   if(!addSide){setMsg('Please select attack or defense.',false);return;}
   
-  strats.push({
+  const newStrat = {
     id:Date.now().toString(),
     url,
     title:document.getElementById('add-title').value.trim(),
@@ -502,13 +509,27 @@ function saveStrat(){
     side:addSide,
     operators:[...addSelOps],
     added:Date.now()
-  });
-  
-  persist();
-  setMsg('Strat saved!',true);
-  clearAddForm(true);
-  renderAllList(); updateCount();
-  setTimeout(()=>switchTab('all'),600);
+  };
+
+  setMsg('Saving to cloud database...', true);
+
+  try {
+    const { error } = await supabase.from('strats').insert({
+      id: newStrat.id,
+      payload: JSON.stringify(newStrat)
+    });
+
+    if (error) throw error;
+
+    strats.push(newStrat);
+    setMsg('Strat saved safely to cloud!',true);
+    clearAddForm(true);
+    renderAllList(); 
+    updateCount();
+    setTimeout(()=>switchTab('all'),600);
+  } catch(e) {
+    setMsg('Error saving: ' + e.message, false);
+  }
 }
 
 function clearAddForm(keepMsg){
@@ -523,18 +544,25 @@ function clearAddForm(keepMsg){
   if(!keepMsg)document.getElementById('add-msg').textContent='';
 }
 
-function deleteStrat(id){
+// DELETE DIRECTLY FROM CLOUD DATABASE
+async function deleteStrat(id){
   const i=strats.findIndex(s=>s.id===id);
   if(i===-1)return;
   
-  // Added "Are you sure?" confirmation dialog
   if (!confirm("Are you sure you want to delete this strategy? This action cannot be undone.")) {
     return;
   }
   
-  strats.splice(i,1);
-  persist();
-  renderAllList(); updateCount();
+  try {
+    const { error } = await supabase.from('strats').delete().eq('id', id);
+    if (error) throw error;
+
+    strats.splice(i,1);
+    renderAllList(); 
+    updateCount();
+  } catch(e) {
+    alert("Could not delete strategy from cloud: " + e.message);
+  }
 }
 
 function switchTab(t){
@@ -544,7 +572,6 @@ function switchTab(t){
   if(t==='all')renderAllList();
 }
 
-// Global programmatic event listeners
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.tabs .tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -552,7 +579,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Map option tracking to load objective sites instantly
   document.getElementById('find-map').addEventListener('change', () => updateObjectiveOptions('find-map', 'find-obj', true));
   document.getElementById('add-map').addEventListener('change', () => updateObjectiveOptions('add-map', 'add-obj', false));
 
@@ -578,7 +604,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('find-results').addEventListener('click', captureDelete);
 
   load();
-  // Init selectors state cleanly
   updateObjectiveOptions('find-map', 'find-obj', true);
   updateObjectiveOptions('add-map', 'add-obj', false);
 });
