@@ -214,7 +214,7 @@
 // ==========================================
 const SUPABASE_URL = 'https://nydxccftkqkztybrfodl.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_cQOaV1XAJAT8ddd9Vu7P0w_Cd5qdHV9';
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const MAPS = ["Bank","Border","Chalet","Clubhouse","Coastline","Consulate","Emerald Plains","Favela","Fortress","Hereford Base","House","Kanal","Kafe Dostoyevsky","Lair","Nighthaven Labs","Oregon","Outback","Skyscraper","Stadium Bravo","Theme Park","Tower","Villa","Yacht"].sort();
 
@@ -285,7 +285,7 @@ let findActiveCat='All', addActiveCat='All';
 // LOAD DATA DIRECTLY FROM SUPABASE CLOUD
 async function load(){
   try {
-    const { data, error } = await supabase.from('strats').select('*');
+    const { data, error } = await supabaseClient.from('strats').select('*');
     if (error) throw error;
     
     if (data) {
@@ -514,7 +514,7 @@ async function saveStrat(){
   setMsg('Saving to cloud database...', true);
 
   try {
-    const { error } = await supabase.from('strats').insert({
+    const { error } = await supabaseClient.from('strats').insert({
       id: newStrat.id,
       payload: JSON.stringify(newStrat)
     });
@@ -554,7 +554,7 @@ async function deleteStrat(id){
   }
   
   try {
-    const { error } = await supabase.from('strats').delete().eq('id', id);
+    const { error } = await supabaseClient.from('strats').delete().eq('id', id);
     if (error) throw error;
 
     strats.splice(i,1);
